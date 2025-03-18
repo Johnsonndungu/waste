@@ -6,7 +6,7 @@ from mysql.connector import Error
 from werkzeug.security import generate_password_hash
 
 app = Flask(__name__)
-app.secret_key = "mnndnkjkfkslkklakljkdfkjreoirfjdkfkdjgjkfdgjkd"
+app.secret_key = "your secrete"
 
 
 # Database Connection
@@ -14,9 +14,9 @@ def create_db_connection():
     try:
         return mysql.connector.connect(
             host="localhost",
-            user="root",
-            password="Root",
-            database="waste"
+            user="",
+            password="",
+            database=""
 )
     except Error as e:
         print(f'Error connecting to MySQL DB: {e}')
