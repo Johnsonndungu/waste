@@ -1,0 +1,48 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Staff Waste Input</title>
+    <!-- Bootstrap CSS -->
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+</head>
+<body class="bg-light">
+    <div class="container mt-5">
+        <h1 class="text-center mb-4">Waste Management - Staff Input</h1>
+        <div class="card shadow">
+            <div class="card-body">
+                <form action="{{ url_for('process_waste') }}" method="POST">
+                    <div class="mb-3">
+                        <label for="tenant_code" class="form-label">Tenant Code:</label>
+                        <select id="tenant_code" name="tenant_code" class="form-select" required>
+                            <option value="" disabled selected>Select Tenant Code</option>
+                            {% for tenant in tenants %}
+                            <option value="{{ tenant['id'] }}">{{ tenant['code'] }} - {{ tenant['name'] }}</option>
+                            {% endfor %}
+                        </select>
+                    </div>
+                    <div class="mb-3">
+                        <label for="waste_kgs" class="form-label">Waste (in KGs):</label>
+                        <input type="number" id="waste_kgs" name="waste_kgs" class="form-control" step="0.01" required>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">Organic Content:</label>
+                        <div class="form-check">
+                            <input type="radio" id="organic_more" name="organic_content" value="more" class="form-check-input" required>
+                            <label for="organic_more" class="form-check-label">More than 65%</label>
+                        </div>
+                        <div class="form-check">
+                            <input type="radio" id="organic_less" name="organic_content" value="less" class="form-check-input" required>
+                            <label for="organic_less" class="form-check-label">Less than 65%</label>
+                        </div>
+                    </div>
+                    <button type="submit" class="btn btn-primary w-100">Submit</button>
+                </form>
+            </div>
+        </div>
+    </div>
+    <!-- Bootstrap JS Bundle with Popper -->
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+</body>
+</html>
