@@ -3,32 +3,55 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Add tenent | Wast Management</title>
+    <title>Add Tenant | Waste Management</title>
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css">
 </head>
 <body>
 
 <div class="container d-flex justify-content-center align-items-center min-vh-100">
-    <div class="card p-4 shadow-lg rounded-4 border-0" style="max-width: 400px; width: 100%;">
+    <div class="card p-4 shadow-lg rounded-4 border-0" style="max-width: 500px; width: 100%;">
         <h3 class="text-center fw-bold">Add Tenant</h3>
-        <p class="text-center text-muted">Add new tenent</p>
+        <p class="text-center text-muted">Add a new tenant to the system</p>
 
-        <form >
+        <form method="POST" action="{{ url_for('add_tenant') }}">
+            <!-- First Name -->
             <div class="mb-3">
-                <label class="form-label">Full Name</label>
-                <input type="Full Name" class="form-control rounded-pill" placeholder="Enter Tenant full Name">
+                <label class="form-label" for="first_name">First Name</label>
+                <input type="text" class="form-control rounded-pill" id="first_name" name="first_name" placeholder="Enter Tenant's First Name" required>
             </div>
+            <!-- last Name -->
             <div class="mb-3">
-                <label class="form-label">Phone Number</label>
-                <input type="phone-number" class="form-control rounded-pill shrinking-placeholder" placeholder="Enter your tenant Phone number">
+                <label class="form-label" for="last_name">Last Name</label>
+                <input type="text" class="form-control rounded-pill" id="last_name" name="last_name" placeholder="Enter Tenant's Last Name" required>
             </div>
+
+            <!-- Email Address -->
             <div class="mb-3">
-                <label class="form-label">Collection Code</label>
-                <input type="Collection-code" class="form-control rounded-pill shrinking-placeholder" placeholder="Enter tenant Collection code">
+                <label class="form-label" for="email">Email</label>
+                <input type="email" class="form-control rounded-pill" id="email" name="email" placeholder="Enter Tenant's Email" required>
             </div>
+
+            <!-- Phone Number -->
+            <div class="mb-3">
+                <label class="form-label" for="phone">Phone Number</label>
+                <input type="tel" class="form-control rounded-pill" id="phone" name="phone" placeholder="Enter Tenant's Phone Number" required>
+            </div>
+
+            <!-- Landlord Selection (only for admin) -->
+            {% if current_user.role == 'admin' %}
+            <div class="mb-3">
+                <label class="form-label" for="landlord_id">Select Landlord</label>
+                <select class="form-control rounded-pill" id="landlord_id" name="landlord_id" required>
+                    {% for landlord in landlords %}
+                        <option value="{{ landlord.id }}">{{ landlord.first_name }} {{ landlord.last_name }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            {% endif %}
+
+            <!-- Submit Button -->
             <div>
                 <button type="submit" class="btn btn-primary w-100 rounded-pill">Add Tenant</button>
-            </div>
             </div>
         </form>
     </div>

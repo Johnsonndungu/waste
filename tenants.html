@@ -1,0 +1,75 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Tenants and Landlords</title>
+    <!-- Bootstrap CSS -->
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <!-- Font Awesome for icons -->
+    <script src="https://kit.fontawesome.com/your-fontawesome-kit.js"></script>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/styles.css') }}">
+</head>
+
+<body>
+    <!-- Sidebar -->
+    <div class="sidebar">
+        <h2 class="text-center text-white">Admin Dashboard</h2>
+        <hr class="text-white">
+        <a href="/admin-dashboard"><i class="fas fa-tachometer-alt"></i> Dashboard</a>
+        <a href="/tenants"><i class="fas fa-users"></i> Tenants</a>
+        <a href="/landlords"><i class="fas fa-user-tie"></i> Landlords</a>
+        <a href="/settings"><i class="fas fa-cogs"></i> Settings</a>
+        <a href="/logout"><i class="fas fa-sign-out-alt"></i> Logout</a>
+    </div>
+
+    <!-- Main Content -->
+    <div class="content">
+        <!-- Flash Messages -->
+        {% with messages = get_flashed_messages(with_categories=true) %}
+        {% if messages %}
+        {% for category, message in messages %}
+        <div class="alert alert-{{ category }} alert-dismissible fade show" role="alert">
+            {{ message }}
+            <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+        </div>
+        {% endfor %}
+        {% endif %}
+        {% endwith %}
+
+        <!-- Tenants and Landlords Section -->
+        <div class="container mt-5">
+            <h1 class="text-center">Tenants and Landlords</h1>
+            <table class="table table-bordered mt-4">
+                <thead class="table-primary">
+                    <tr>
+                        <th>Tenant ID</th>
+                        <th>Tenant Name</th>
+                        <th>Tenant Email</th>
+                        <th>Tenant Phone</th>
+                        <th>Landlord Name</th>
+                        <th>Landlord Email</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for tenant in tenants %}
+                    <tr>
+                        <td>{{ tenant.tenant_id }}</td>
+                        <td>{{ tenant.tenant_first_name }} {{ tenant.tenant_last_name }}</td>
+                        <td>{{ tenant.tenant_email }}</td>
+                        <td>{{ tenant.tenant_phone }}</td>
+                        <td>{{ tenant.landlord_first_name }} {{ tenant.landlord_last_name }}</td>
+                        <td>{{ tenant.landlord_email }}</td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+    <!-- Scripts -->
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+</body>
+
+</html>

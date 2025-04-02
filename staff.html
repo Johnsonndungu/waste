@@ -9,23 +9,31 @@
 </head>
 <body class="bg-light">
     <div class="container mt-5">
-        <h1 class="text-center mb-4">Waste Management - Staff Input</h1>
-        <div class="card shadow">
+        <h1 class="text-center mb-4 text-primary">Waste Management - Staff Input</h1>
+        <div class="card shadow-lg border-0">
+            <div class="card-header bg-primary text-white text-center">
+                <h4>Enter Waste Details</h4>
+            </div>
             <div class="card-body">
                 <form action="{{ url_for('process_waste') }}" method="POST">
+                    <!-- Tenant Code -->
                     <div class="mb-3">
                         <label for="tenant_code" class="form-label">Tenant Code:</label>
-                        <select id="tenant_code" name="tenant_code" class="form-select" required>
+                        <select id="tenant_code" name="tenant_code" class="form-select rounded-pill" required>
                             <option value="" disabled selected>Select Tenant Code</option>
                             {% for tenant in tenants %}
                             <option value="{{ tenant['id'] }}">{{ tenant['code'] }} - {{ tenant['name'] }}</option>
                             {% endfor %}
                         </select>
                     </div>
+
+                    <!-- Waste in KGs -->
                     <div class="mb-3">
                         <label for="waste_kgs" class="form-label">Waste (in KGs):</label>
-                        <input type="number" id="waste_kgs" name="waste_kgs" class="form-control" step="0.01" required>
+                        <input type="number" id="waste_kgs" name="waste_kgs" class="form-control rounded-pill" step="0.01" placeholder="Enter waste in kilograms" required>
                     </div>
+
+                    <!-- Organic Content -->
                     <div class="mb-3">
                         <label class="form-label">Organic Content:</label>
                         <div class="form-check">
@@ -37,11 +45,14 @@
                             <label for="organic_less" class="form-check-label">Less than 65%</label>
                         </div>
                     </div>
-                    <button type="submit" class="btn btn-primary w-100">Submit</button>
+
+                    <!-- Submit Button -->
+                    <button type="submit" class="btn btn-primary w-100 rounded-pill">Submit</button>
                 </form>
             </div>
         </div>
     </div>
+
     <!-- Bootstrap JS Bundle with Popper -->
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
 </body>
