@@ -3,6 +3,7 @@ from functools import wraps
 from flask import Flask, flash, redirect, render_template, request, session, url_for, abort
 import mysql.connector
 import secrets
+from itsdangerous import BadSignature, SignatureExpired
 from werkzeug.security import generate_password_hash, check_password_hash
 from flask_mail import Mail, Message
 from itsdangerous import URLSafeTimedSerializer
@@ -11,20 +12,28 @@ from flask_wtf import FlaskForm
 from wtforms import StringField, PasswordField
 from wtforms.validators import InputRequired, Email, Length
 from authlib.integrations.flask_client import OAuth
+from dotenv import load_dotenv
+from models import User
 
+
+# Load environment variables from .env file
+load_dotenv()
 app = Flask(__name__)
+application = app
+
 # Generate a secure random key to create sessions
 app.secret_key = secrets.token_hex(16)
 
-# Setup the serializer for generating Password reset token
+# serializer for generating Password reset token
 s = URLSafeTimedSerializer(app.secret_key)
 
 # Mail configuration for password reset
 app.config['MAIL_SERVER'] = 'smtp.gmail.com'
 app.config['MAIL_PORT'] = 587
 app.config['MAIL_USE_TLS'] = True
-app.config['MAIL_USERNAME'] = os.getenv('MAIL_USERNAME')  # use environment variables
-app.config['MAIL_PASSWORD'] = os.getenv('MAIL_PASSWORD')  # use environment variables
+app.config['MAIL_USERNAME'] = ''  
+app.config['MAIL_PASSWORD'] = '' 
+app.config['MAIL_DEFAULT_SENDER'] = ''
 
 mail = Mail(app)
 
@@ -36,13 +45,13 @@ login_manager.init_app(app)
 def create_db_connection():
     try:
         connection = mysql.connector.connect(
-            host="localhost",
-            user="",  # Update with actual DB username
-            password="",  # Update with actual DB password
-            database=""  # Update with actual database name
+            host='',
+            user='',
+            password='',
+            database='',
         )
         if connection.is_connected():
-            print("Connected to MySQL DB")  # Print message if the connection is successful
+            print("Connected to MySQL DB")
             return connection
         else:
             print("Database connection failed")
@@ -62,106 +71,75 @@ def role_required(role):
         return wrapper
     return decorator
 
-# Validating user in DB 
-def verify_user(email, password):
-    try:
-        connection = create_db_connection()
-        if not connection:
-            flash('DB connection error', 'error')
-            return None
-
-        cursor = connection.cursor(dictionary=True)
-
-        # Check the `users` table
-        query = "SELECT * FROM users WHERE email = %s"
-        cursor.execute(query, (email,))
-        user = cursor.fetchone()
-
-        # Compare plain text passwords (for testing purposes only)
-        if user and user['password'] == password:
-            return user  # Return user if found in `users` table
-
-        return None
-    except mysql.connector.Error as e:
-        print(f"Error verifying user: {e}")
-        return None
-    finally:
-        if 'cursor' in locals():
-            cursor.close()
-        if 'connection' in locals():
-            connection.close()
 
 
 # Initialize OAuth
 oauth = OAuth(app)
 
 # Google OAuth Configuration
-app.config['GOOGLE_CLIENT_ID'] = 'your-google-client-id.apps.googleusercontent.com'  # Replace with your Google client ID
-app.config['GOOGLE_CLIENT_SECRET'] = 'your-google-client-secret'  # Replace with your Google client secret
-app.config['SECRET_KEY'] = ''  # set securely
+app.config['GOOGLE_CLIENT_ID'] = ''  
+app.config['GOOGLE_CLIENT_SECRET'] = ''
+app.config['SECRET_KEY'] = app.secret_key 
 
 google = oauth.register(
     name='google',
     client_id=app.config['GOOGLE_CLIENT_ID'],
     client_secret=app.config['GOOGLE_CLIENT_SECRET'],
-    access_token_url='https://accounts.google.com/o/oauth2/token',
-    access_token_params=None,
-    authorize_url='https://accounts.google.com/o/oauth2/auth',
-    authorize_params=None,
-    api_base_url='https://www.googleapis.com/oauth2/v1/',
-    userinfo_endpoint='https://www.googleapis.com/oauth2/v1/userinfo',  # This is the endpoint for user info
-    client_kwargs={'scope': 'openid email profile'},
+    server_metadata_url='https://accounts.google.com/.well-known/openid-configuration',
+    client_kwargs={
+        'scope': 'openid email profile'
+    }
 )
 
-# Google Login Route
+
 @app.route('/google-login')
 def google_login():
     redirect_uri = url_for('google_authorize', _external=True)
     return google.authorize_redirect(redirect_uri)
 
+
 @app.route('/google-authorize')
 def google_authorize():
-    token = google.authorize_access_token()
-    user_info = google.get('userinfo').json()
-
-    # Check if the user exists in the database
-    email = user_info['email']
     try:
+        token = google.authorize_access_token()
+
+        user_info = google.get('userinfo').json()
+
+        email = user_info.get('email')
+
         connection = create_db_connection()
         if not connection:
             flash("Database connection error", "error")
-            if request.referrer:
-                return redirect(request.referrer)  # Redirect back to the previous page
-            else:
-                return redirect(url_for('tenant_login'))  # Fallback to tenant login if referrer is not available
+            return render_template('nodbconnection.html')
 
         cursor = connection.cursor(dictionary=True)
         cursor.execute("SELECT * FROM users WHERE email = %s", (email,))
         user = cursor.fetchone()
 
-        if user:
-            # Log the user in
-            login_user(User(user['id'], user['email'], user['role']))
-            flash('Login Successful!', 'success')
 
-            # Redirect based on user role
-            if user['role'] == 'admin':
+        if user:
+            login_user(User(user['id'], user['email'], user['role']))
+            flash("Login successful!", "success")
+
+            role = user['role']
+            if role == 'admin':
                 return redirect(url_for('admin_dashboard'))
-            elif user['role'] == 'landlord':
+            elif role == 'landlord':
                 return redirect(url_for('landlord_dashboard'))
             else:
                 return redirect(url_for('tenant_dashboard'))
-        else:
-            flash('No account associated with this Google account.', 'error')
-            return redirect(url_for('tenant_login'))  # Default to tenant login
-    except mysql.connector.Error as e:
-        flash(f"Error checking user: {e}", "error")
-        return redirect(url_for('tenant_login'))  # Default to tenant login
+        
+
+    except Exception as e:
+        flash(f"Login error: {e}", "error")
+        return render_template('login_error.html')
+
     finally:
         if 'cursor' in locals():
             cursor.close()
         if 'connection' in locals():
             connection.close()
+
 
 # User model for Flask-Login (with role)
 class User(UserMixin):
@@ -186,33 +164,66 @@ class LoginForm(FlaskForm):
     email = StringField('Email', validators=[InputRequired(), Email(), Length(max=50)])
     password = PasswordField('Password', validators=[InputRequired(), Length(min=8, max=80)])
 
-# Admin login
+
+
+def verify_user(email, password):
+    try:
+        connection = create_db_connection()
+        if not connection:
+            flash('DB connection error', 'error')
+            return None
+
+        cursor = connection.cursor(dictionary=True)
+
+        # Check the users table
+        query = "SELECT * FROM users WHERE email = %s"
+        cursor.execute(query, (email,))
+        user = cursor.fetchone()
+
+        # Use password hash verification
+        if user and check_password_hash(user['password'], password):
+            return user  # Return user if found and password matches
+
+        return None
+    except mysql.connector.Error as e:
+        print(f"Error verifying user: {e}")
+        return None
+    finally:
+        if 'cursor' in locals():
+            cursor.close()
+        if 'connection' in locals():
+            connection.close()
+            
+
+# Admin login route 
 @app.route('/', methods=['GET', 'POST'])
 def admin_login():
     if request.method == 'POST':
         email = request.form.get('email')
         password = request.form.get('password')
 
-        print(f"Login attempt with email: {email}")
-
+        # Validate input
         if not email or not password:
             flash('Please provide both email and password', 'error')
-            return redirect(url_for('admin_login'))
+            return render_template('login_admin.html')
 
-        admin = verify_user(email, password)
-        if admin:
-            print(f"User found: {admin}")
-        else:
-            print("User not found or invalid password")
+        try:
+            # Verify user credentials
+            admin = verify_user(email, password)
+            if admin and admin['role'] == 'admin':
+                # Log the user in
+                login_user(User(admin['id'], admin['email'], admin['role']))
+                flash('Login Successful!', 'success')
+                return redirect(url_for('admin_dashboard'))
+            else:
+                flash('Invalid email or password', 'error')
+                return render_template('login_error.html')
+        except Exception as e:
+            flash(f"An error occurred during login: {e}", 'error')
+            return render_template('login_admin.html')
 
-        if admin and admin['role'] == 'admin':
-            login_user(User(admin['id'], admin['email'], admin['role']))
-            flash('Login Successful!', 'success')
-            return redirect(url_for('admin_dashboard'))
-        else:
-            return render_template('login_error.html')
-    
     return render_template('login_admin.html')
+
 
 # Admin dashboard
 @app.route('/admin-dashboard')
@@ -227,6 +238,14 @@ def admin_dashboard():
 
         cursor = connection.cursor(dictionary=True)
 
+        # Fetch total staff
+        cursor.execute("SELECT COUNT(*) AS total_staffs FROM users WHERE role = 'staff'")
+        total_staffs = cursor.fetchone()['total_staffs']
+        
+        # Fetch staff
+        cursor.execute("SELECT * FROM users WHERE role='staff'")
+        staff = cursor.fetchall()
+        
         # Fetch total landlords
         cursor.execute("SELECT COUNT(*) AS total_landlords FROM users WHERE role='landlord'")
         total_landlords = cursor.fetchone()['total_landlords']
@@ -236,14 +255,14 @@ def admin_dashboard():
         landlords = cursor.fetchall()
 
         # Fetch total tenants
-        cursor.execute("SELECT COUNT(*) AS total_tenants FROM tenants ")
+        cursor.execute("SELECT COUNT(*) AS total_tenants FROM users WHERE role='tenant'")
         total_tenants = cursor.fetchone()['total_tenants']
 
         # Fetch tenants
-        cursor.execute("SELECT * FROM tenants")
+        cursor.execute("SELECT * FROM users WHERE role='tenant'")
         tenant = cursor.fetchall()
 
-        return render_template('admin_dashboard.html', landlords=landlords, tenant=tenant, total_tenants=total_tenants, total_landlords=total_landlords,)
+        return render_template('admin_dashboard.html', total_staffs = total_staffs, staff=staff, landlords=landlords, tenant=tenant, total_tenants=total_tenants, total_landlords=total_landlords,)
     
     except mysql.connector.Error as e:
         flash(f"Error loading admin dashboard: {e}", 'error')
@@ -295,11 +314,7 @@ def add_landlord():
             return redirect(url_for('add_landlord'))
 
         # Generate unique landlord ID
-        landlord_id = generate_unique_landlord_id()
-
-        # Hash the password for security
-        password = generate_password_hash('defaultpassword')  # Default password can be changed
-
+        landlord_id = + 1
         # Insert landlord into the database
         try:
             connection = create_db_connection()
@@ -331,27 +346,6 @@ def add_landlord():
 
     return url_for('admin_dashboard')
 
-# Function to generate unique landlord ID
-def generate_unique_landlord_id():
-    connection = create_db_connection()
-    if not connection:
-        flash("Database connection error", 'error')
-        return None
-
-    cursor = connection.cursor(dictionary=True)
-    cursor.execute("SELECT landlord_id FROM users WHERE role='landlord' ORDER BY landlord_id DESC LIMIT 1")
-    last_landlord = cursor.fetchone()
-
-    if last_landlord:
-        last_id = last_landlord['landlord_id']
-        number_part = int(last_id[3:])  # Extract the numeric part after 'lan'
-        new_number = number_part + 1
-    else:
-        new_number = 1  # If no landlords exist, start from 1
-
-    landlord_id = f"lan{new_number:03}"  # Format with leading zeros (e.g., lan001, lan002, etc.)
-    return landlord_id
-
 # View all landlords
 @app.route('/view-landlords')
 @login_required
@@ -380,54 +374,6 @@ def view_landlords():
         if 'connection' in locals():
             connection.close()
 
-# Add Tenant Function
-@app.route('/add_tenant', methods=['GET', 'POST'])
-@login_required
-@role_required('admin')
-@role_required('landlord')  # Only admins and landlords can add tenants
-def add_tenant():
-    if request.method == 'POST':
-        first_name = request.form.get('first_name')
-        last_name = request.form.get('last_name')
-        email = request.form.get('email')
-        phone = request.form.get('phone')
-        password = request.form.get('password')
-        landlord_id = request.form.get('landlord_id')
-
-        # Validate the input
-        if not first_name or not last_name or not email or not phone or not password or not landlord_id:
-            flash("All fields are required!", "error")
-            return redirect(url_for('add_tenant'))
-
-        # Insert tenant into the centralized tenants table
-        try:
-            connection = create_db_connection()
-            if not connection:
-                flash("Database connection error", 'error')
-                return redirect(url_for('add_tenant'))
-
-            cursor = connection.cursor(dictionary=True)
-
-            # Insert tenant into the tenants table
-            query = """
-                INSERT INTO tenants (first_name, last_name, email, phone, password, landlord_id)
-                VALUES (%s, %s, %s, %s, %s, %s)
-            """
-            cursor.execute(query, (first_name, last_name, email, phone, password, landlord_id))
-            connection.commit()
-
-            flash('Tenant added successfully!', 'success')
-            return redirect(url_for('admin_dashboard'))  # Redirect to admin's dashboard
-        
-        except mysql.connector.Error as e:
-            flash(f"Error adding tenant: {e}", "error")
-            return redirect(url_for('add_tenant'))
-        
-        finally:
-            if 'cursor' in locals():
-                cursor.close()
-            if 'connection' in locals():
-                connection.close()
 
     # Fetch landlords for the dropdown
     try:
@@ -455,7 +401,7 @@ def add_tenant():
 @app.route('/search_tenant', methods=['GET', 'POST'])
 @login_required
 @role_required('admin')
-# Only admins and landlords should access this page
+# Only admins and landlords can search for tenants
 def search_tenant():
     if request.method == 'POST':
         search_query = request.form.get('search_query')
@@ -463,13 +409,13 @@ def search_tenant():
         try:
             connection = create_db_connection()
             cursor = connection.cursor(dictionary=True)
-            query = "SELECT * FROM tenants WHERE (first_name LIKE %s OR last_name LIKE %s)"
+            query = "SELECT * FROM users WHERE (first_name LIKE %s OR last_name LIKE %s)"
             cursor.execute(query, (f'%{search_query}%', f'%{search_query}%'))
             tenants = cursor.fetchall()
-            return render_template('dashboard_landlord.html', tenants=tenants)
+            return render_template('admin_dashboard.html', tenants=tenants)
         except mysql.connector.Error as e:
             flash(f"Error searching tenant: {e}", "error")
-            return redirect(url_for('landlord_dashboard'))
+            return redirect(url_for('admin_dashboard'))
         finally:
             if 'cursor' in locals():
                 cursor.close()
@@ -492,20 +438,20 @@ def tenants():
 
         # Fetch tenants along with their associated landlords
         query = """
-            SELECT 
-                tenants.id AS tenant_id,
-                tenants.first_name AS tenant_first_name,
-                tenants.last_name AS tenant_last_name,
-                tenants.email AS tenant_email,
-                tenants.phone AS tenant_phone,
-                users.id AS landlord_id,
-                users.first_name AS landlord_first_name,
-                users.last_name AS landlord_last_name,
-                users.email AS landlord_email
-            FROM tenants
-            JOIN users ON tenants.landlord_id = users.id
-            WHERE users.role = 'landlord'
-        """
+                SELECT 
+                    tenants.id AS tenant_id,
+                    tenants.first_name AS tenant_first_name,
+                    tenants.last_name AS tenant_last_name,
+                    tenants.email AS tenant_email,
+                    tenants.phone AS tenant_phone,
+                    landlords.id AS landlord_id,
+                    landlords.first_name AS landlord_first_name,
+                    landlords.last_name AS landlord_last_name,
+                    landlords.email AS landlord_email
+                    FROM users AS tenants
+                    JOIN users AS landlords ON tenants.landlord_id = landlords.id
+                    WHERE landlords.role = 'landlord'
+                """
         cursor.execute(query)
         tenants_with_landlords = cursor.fetchall()
 
@@ -520,7 +466,7 @@ def tenants():
             connection.close()
 
 # Landlord login
-@app.route('/landlord-login', methods=['GET', 'POST'])
+@app.route('/landlord', methods=['GET', 'POST'])
 def landlord_login():
     if request.method == 'POST':
         email = request.form.get('email')
@@ -541,7 +487,7 @@ def landlord_login():
                 return redirect(url_for('landlord_dashboard'))
             else:
                 flash('Invalid email or password', 'error')
-                return redirect(url_for('landlord_login'))
+                return render_template('landlord_login_error.html')
         except Exception as e:
             flash(f"An error occurred during login: {e}", 'error')
             return redirect(url_for('landlord_login'))
@@ -578,11 +524,22 @@ def landlord_dashboard():
                 last_name,
                 email,
                 phone
-            FROM tenants
+            FROM users
             WHERE landlord_id = %s
         """
         cursor.execute(query, (landlord_id,))
         tenants = cursor.fetchall()
+
+        # Fetch tenants
+        tenants_query = "SELECT id AS tenant_id, first_name, last_name, phone FROM users WHERE landlord_id = %s"
+        cursor.execute(tenants_query, (current_user.id,))
+        tenants = cursor.fetchall()
+
+        # Fetch total tenants
+        total_tenants_query = "SELECT COUNT(*) AS total_tenants FROM users WHERE landlord_id = %s"
+        cursor.execute(total_tenants_query, (current_user.id,))
+        total_tenants = cursor.fetchone()['total_tenants']
+
 
         # Render the landlord dashboard with landlord and tenant data
         return render_template('dashboard_landlord.html', landlord=landlord, tenants=tenants)
@@ -596,32 +553,85 @@ def landlord_dashboard():
         if 'connection' in locals():
             connection.close()
 
+@app.route('/landlord/add-tenant', methods=['GET', 'POST'])
+@login_required
+@role_required('landlord')  # Ensures only landlords can access this route
+def landlord_add_tenant():
+    landlord_id = current_user.id  # Get the ID of the logged-in landlord
+
+    if request.method == 'POST':
+        first_name = request.form.get('first_name')
+        last_name = request.form.get('last_name')
+        email = request.form.get('email')
+        phone = request.form.get('phone')
+        password = request.form.get('password')
+
+        # Validate the input
+        if not first_name or not last_name or not email or not phone or not password:
+            flash("All fields are required!", "error")
+            return redirect(url_for('landlord_add_tenant'))
+
+        try:
+            connection = create_db_connection()
+            if not connection:
+                flash("Database connection error", 'error')
+                return redirect(url_for('landlord_add_tenant'))
+
+            cursor = connection.cursor(dictionary=True)
+
+            # Insert tenant into the `users` table
+            query = """
+                INSERT INTO users (first_name, last_name, email, phone, password, landlord_id, role)
+                VALUES (%s, %s, %s, %s, %s, %s, 'tenant')
+            """
+            cursor.execute(query, (first_name, last_name, email, phone, password, landlord_id))
+            connection.commit()
+
+            flash('Tenant added successfully!', 'success')
+            return redirect(url_for('landlord_dashboard'))  # Redirect to the landlord dashboard
+        except mysql.connector.Error as e:
+            flash(f"Error adding tenant: {e}", 'error')
+            return redirect(url_for('landlord_add_tenant'))
+        finally:
+            if 'cursor' in locals():
+                cursor.close()
+            if 'connection' in locals():
+                connection.close()
+
+    return render_template('add_tenant_landlord.html')  # Render the landlord's add tenant form
+
 # Staff login
-@app.route('/staff-login', methods=['GET', 'POST'])
+@app.route('/staff', methods=['GET', 'POST'])
 def staff_login():
     if request.method == 'POST':
         email = request.form.get('email')
         password = request.form.get('password')
 
+        # Validate input
         if not email or not password:
             flash('Please provide both email and password', 'error')
-            return redirect(url_for('staff_login'))
+            return render_template('stafflogin.html')
 
-        staff = verify_user(email, password)
-        if staff and staff['role'] == 'staff':
-            login_user(User(staff['id'], staff['email'], staff['role']))
-            flash('Login Successful!', 'success')
-            return redirect(url_for('staff_input'))  # Redirect to the staff input page
-        else:
-            flash('Invalid email or password', 'error')
-            return redirect(url_for('staff_login'))
+        try:
+            # Verify user credentials
+            staff = verify_user(email, password)
+            if staff and staff['role'] == 'staff':
+                # Log the user in
+                login_user(User(staff['id'], staff['email'], staff['role']))
+                flash('Login Successful!', 'success')
+                return redirect(url_for('staff_input'))
+            else:
+                flash('Invalid email or password', 'error')
+                return render_template('login_error.html')
+        except Exception as e:
+            flash(f"An error occurred during login: {e}", 'error')
+            return render_template('login_staff.html')
 
     return render_template('stafflogin.html')
-
 # Staff input page
 @app.route('/staff-input') 
-@login_required            # Login is required inorder to access this page 
-@role_required('staff')  # This ensure only staff can access this page
+@login_required            
+@role_required('staff')    
 def staff_input():
     try:
         connection = create_db_connection()
@@ -631,8 +641,13 @@ def staff_input():
 
         cursor = connection.cursor(dictionary=True)
 
-        # Fetch tenants for the dropdown
-        query = "SELECT id, CONCAT(first_name, ' ', last_name) AS name, code FROM tenants"
+        # Fetch tenants with IDs starting with 'tent' and include their names
+        query = """
+                SELECT 
+                    id AS tenant_id, 
+                    CONCAT('tent', id, ' - ', first_name, ' ', last_name) AS display_name 
+                    FROM users WHERE role = 'tenant'
+                """
         cursor.execute(query)
         tenants = cursor.fetchall()
 
@@ -646,74 +661,142 @@ def staff_input():
         if 'connection' in locals():
             connection.close()
 
+@app.route('/process_waste', methods=['POST'])
+@login_required
+@role_required('staff')  # Ensure only staff can access this route
+def process_waste():
+    try:
+        # Retrieve form data
+        tenant_id = request.form.get('tenant_id')
+        waste_amount = request.form.get('waste_amount')
+
+        # Validate input
+        if not tenant_id or not waste_amount:
+            flash("All fields are required!", "error")
+            return redirect(url_for('staff_input'))
+
+        # Establish database connection
+        connection = create_db_connection()
+        if not connection:
+            flash("Database connection error", "error")
+            return redirect(url_for('staff_input'))
+
+        cursor = connection.cursor(dictionary=True)
+
+        # Update the waste amount for the tenant
+        update_query = """
+            UPDATE users
+            SET waste_amount = COALESCE(waste_amount, 0) + %s
+            WHERE id = %s AND role = 'tenant'
+        """
+        cursor.execute(update_query, (waste_amount, tenant_id))
+        connection.commit()
+
+        flash("Waste data processed successfully!", "success")
+        return redirect(url_for('success'))  # Redirect to the success page
+    except mysql.connector.Error as e:
+        flash(f"Error processing waste: {e}", "error")
+        return redirect(url_for('staff_input'))
+    finally:
+        if 'cursor' in locals():
+            cursor.close()
+        if 'connection' in locals():
+            connection.close()
+
+@app.route('/success')
+@login_required
+@role_required('staff')  
+def success():
+    return render_template('success.html')
+
 # Tenant login
-@app.route('/tenant-login', methods=['GET', 'POST'])
+@app.route('/tenant', methods=['GET', 'POST'])
 def tenant_login():
     if request.method == 'POST':
         email = request.form.get('email')
         password = request.form.get('password')
 
+        # Validate input
         if not email or not password:
             flash('Please provide both email and password', 'error')
-            return redirect(url_for('tenant_login'))
+            return render_template('login_tenant.html')
 
-        tenant = verify_user(email, password)
-        if tenant and tenant['role'] == 'tenant':
-            session['user_id'] = tenant['id']
-            login_user(User(tenant['id'], tenant['email'], tenant['role']))
-            flash('Login Successful!', 'success')
-            return redirect(url_for('tenant_dashboard'))
-        else:
-            return render_template('tenant_login_error.html')
-    
+        try:
+            # Verify user credentials
+            tenant = verify_user(email, password)
+            if tenant and tenant['role'] == 'tenant':
+                # Log the user in
+                login_user(User(tenant['id'], tenant['email'], tenant['role']))
+                flash('Login Successful!', 'success')
+                return redirect(url_for('tenant_dashboard'))
+            else:
+                flash('Invalid email or password', 'error')
+                return render_template('tenant_login_error.html')
+        except Exception as e:
+            flash(f"An error occurred during login: {e}", 'error')
+            return render_template('login_tenant.html')
+
     return render_template('login_tenant.html')
 
 # Tenant dashboard
-@app.route('/tenant-dashboard', methods=['GET', 'POST'])
+@app.route('/tenant-dashboard')
 @login_required
-@role_required('tenant')
+@role_required('tenant') 
 def tenant_dashboard():
     tenant_id = current_user.id  # Get the ID of the logged-in tenant
+
     try:
         # Establish database connection
         connection = create_db_connection()
         if not connection:
             flash("Database connection error", "error")
-            return redirect(url_for('tenant_dashboard'))
+            return redirect(url_for('tenant_login'))
 
         cursor = connection.cursor(dictionary=True)
 
-        # Query to get tenant information
-        cursor.execute("SELECT * FROM users WHERE id = %s AND role = 'tenant'", (tenant_id))
-        tenant = cursor.fetchone()
+        # Fetch tenant-specific data from the `users` table
+        query_tenant = "SELECT first_name, last_name, email, phone FROM users WHERE id = %s AND role = 'tenant'"
+        cursor.execute(query_tenant, (tenant_id,))
+        tenant = cursor.fetchone()  # Fetch tenant details
+
         if not tenant:
             flash("Tenant not found", "error")
             return redirect(url_for('tenant_login'))
 
-        # Query to get tenant-specific data (e.g., waste management data)
-        # Replace 'tenant_data_table' with the actual table name
-        cursor.execute(f"SELECT * FROM tenant_data_table WHERE tenant_id = %s", (tenant_id))
-        tenant_data = cursor.fetchall()
+        # Fetch waste data for the tenant from the `users` table
+        query_waste = """
+            SELECT 
+                COALESCE(waste_amount, 0) AS total_kgs
+            FROM users
+            WHERE id = %s AND role = 'tenant'
+        """
+        cursor.execute(query_waste, (tenant_id,))
+        waste_data = cursor.fetchone()  # Fetch waste data
 
-        return render_template('dashboard_tenant.html', tenant=tenant, tenant_data=tenant_data)
+        # Prepare data for the template
+        tenant['name'] = f"{tenant['first_name']} {tenant['last_name']}"
+        total_kgs = waste_data['total_kgs'] or 0
+
+        return render_template(
+            'dashboard_tenant.html',
+            tenant=tenant,
+            total_kgs=total_kgs
+        )
     except mysql.connector.Error as e:
         flash(f"Error loading tenant dashboard: {e}", "error")
         return redirect(url_for('tenant_login'))
     finally:
-        # Close the cursor and connection
+        # Ensure resources are properly closed
         if 'cursor' in locals():
             cursor.close()
         if 'connection' in locals():
             connection.close()
 
 # Edit tenant information                 
-@app.route('/edit_tenant/<string:tenant_id>', methods=['GET', 'POST'])
+@app.route('/edit_tenant/<int:tenant_id>', methods=['POST'])
 @login_required
 @role_required('landlord')
 def edit_tenant(tenant_id):
-    landlord_id = current_user.id  # Get the ID of the logged-in landlord
-    tenant_table_name = f"landlord_{landlord_id}_tenants"
-
     try:
         connection = create_db_connection()
         if not connection:
@@ -722,49 +805,104 @@ def edit_tenant(tenant_id):
 
         cursor = connection.cursor(dictionary=True)
 
-        if request.method == 'POST':
-            first_name = request.form.get('first_name')
-            last_name = request.form.get('last_name')
-            email = request.form.get('email')
-            phone = request.form.get('phone')
+        # Retrieve form data from the modal
+        first_name = request.form.get('first_name')
+        last_name = request.form.get('last_name')
+        email = request.form.get('email')
+        phone = request.form.get('phone')
 
-            # Validate the input
-            if not first_name or not last_name or not email or not phone:
-                flash("All fields are required!", "error")
-                return redirect(url_for('edit_tenant', tenant_id=tenant_id))
-
-            # Update tenant information in the landlord-specific tenant table
-            query = f"""
-                UPDATE {tenant_table_name}
-                SET first_name = %s, last_name = %s, email = %s, phone = %s
-                WHERE tenant_id = %s
-            """
-            cursor.execute(query, (first_name, last_name, email, phone, tenant_id))
-            connection.commit()
-
-            flash('Tenant information updated successfully!', 'success')
-            return redirect(url_for('landlord_dashboard')) # Redirect to landlord's dashboard
-
-        # Fetch tenant information for the form
-        query = f"SELECT * FROM {tenant_table_name} WHERE tenant_id = %s"
-        cursor.execute(query, (tenant_id,))
-        tenant = cursor.fetchone()
-
-        if not tenant:
-            flash("Tenant not found", "error")
+        # Validate input
+        if not all([first_name, last_name, email, phone]):
+            flash("All fields are required!", "error")
             return redirect(url_for('landlord_dashboard'))
 
-        return render_template('edit_tenant.html', tenant=tenant)
+        # Update tenant information in the centralized tenants table
+        update_query = """
+            UPDATE tenants
+            SET first_name = %s, last_name = %s, email = %s, phone = %s
+            WHERE id = %s
+        """
+        cursor.execute(update_query, (first_name, last_name, email, phone, tenant_id))
+        connection.commit()
+
+        flash('Tenant information updated successfully!', 'success')
+        return redirect(url_for('landlord_dashboard'))
 
     except mysql.connector.Error as e:
         flash(f"Error editing tenant: {e}", 'error')
         return redirect(url_for('landlord_dashboard'))
+
     finally:
+        # Ensure resources are properly closed
         if 'cursor' in locals():
             cursor.close()
         if 'connection' in locals():
             connection.close()
+            
+@app.route('/add_staff', methods=['POST'])
+def add_staff():
+    first_name = request.form['first_name']
+    last_name = request.form['last_name']
+    email = request.form['email']
+    phone = request.form['phone']
+    password = request.form['password']
+    
+    hashed_password = generate_password_hash(password)
 
+    conn = create_db_connection()
+    cursor = conn.cursor()
+
+    sql = "INSERT INTO users (first_name, last_name, email, phone, password, role) VALUES (%s, %s, %s, %s, %s, staff)"
+    val = (first_name, last_name, email, phone, hashed_password)
+    
+    cursor.execute(sql, val)
+    conn.commit()
+    conn.close()
+
+    flash("Staff added successfully!", "success")
+    return redirect(url_for('staff_dashboard'))
+            
+            
+@app.route('/staff_dashboard', methods=['GET'])
+def staff_dashboard():
+    # Establish a connection to the database
+    conn = create_db_connection()
+    cursor = conn.cursor(dictionary=True)
+
+    try:
+        cursor.execute("SELECT * FROM users WHERE role = 'staff'")
+        staff_members = cursor.fetchall()
+    except Exception as e:
+        # Handle any errors that might occur during the query
+        print(f"Error fetching staff members: {e}")
+        staff_members = []
+
+    # Close the database connection
+    conn.close()
+
+    # Render the staff_dashboard.html template with the staff data
+    return render_template('staff_dashboard.html', staff_members=staff_members)
+
+            
+# Route for deleting staff
+@app.route('/delete_staff/<int:staff_id>', methods=['GET'])
+def delete_staff(staff_id):
+    conn = create_db_connection()
+    cursor = conn.cursor()
+    try:
+        cursor.execute("DELETE FROM users WHERE id = %s AND role = 'staff'", (staff_id,))
+        conn.commit()
+        flash('Staff member deleted successfully!', 'success')
+    except Exception as e:
+        flash(f'Error deleting staff: {e}', 'danger')
+        conn.rollback()
+    finally:
+        conn.close()
+
+    return redirect(url_for('staff_dashboard'))
+    
+    
+    
 # Delete tenant data from tenant_data_table (for landlords)
 @app.route('/delete_tenant_data/<int:tenant_id>', methods=['POST'])
 @login_required
@@ -855,68 +993,99 @@ def delete_landlord(landlord_id):
         if 'connection' in locals():
             connection.close()
 
-# Password reset request
+
+def find_user_by_email(email):
+    try:
+        connection = create_db_connection()
+        cursor = connection.cursor(dictionary=True)
+        cursor.execute("SELECT * FROM users WHERE email = %s", (email,))
+        user = cursor.fetchone()
+        print(user)
+        return user
+    except mysql.connector.Error as e:
+        print(f"Database error: {e}")
+        return None
+    finally:
+        if 'cursor' in locals(): cursor.close()
+        if 'connection' in locals(): connection.close()
+
+
 @app.route('/reset-password', methods=['GET', 'POST'])
 def reset_password():
+    source = request.args.get('source')
+
     if request.method == 'POST':
         email = request.form.get('email')
-        user = verify_user(email, 'defaultpassword')
+        user = find_user_by_email(email)
+
         if user:
-            token = s.dumps(email, salt='recover-password')
-            msg = Message('Password Reset Request', recipients=[email])
+            token = s.dumps(f"{email}|{source}", salt='recover-password')
             reset_link = url_for('reset_with_token', token=token, _external=True)
+
+            msg = Message('Password Reset Request', recipients=[email])
             msg.body = f"Click the link below to reset your password:\n{reset_link}"
             mail.send(msg)
-            flash('Password reset link sent to your email', 'success')
-            return redirect(url_for('tenant_login'))
-        else:
-            flash('Invalid email address', 'error')
-            return redirect(url_for('reset_password'))
-    return render_template('reset_password.html')
 
-# Reset password with token
+            flash('Password reset link sent to your email.', 'success')
+            return redirect(url_for('pass_link_success'))
+        else:
+            flash('Invalid email address.', 'error')
+            return redirect(url_for('reset_password', source=source))
+
+    return render_template('reset_password.html', source=source)
+
+@app.route('/Password-Reset-link-success')
+def pass_link_success():
+    return render_template('Resetlinksuccess.html')
+
 @app.route('/reset-password/<token>', methods=['GET', 'POST'])
 def reset_with_token(token):
     try:
-        email = s.loads(token, salt='recover-password', max_age=3600)
-    except:
-        flash('The password reset link is invalid or expired', 'error')
+        # Decode the token and extract email and source
+        data = s.loads(token, salt='recover-password', max_age=200) 
+        email, source = data.split('|')
+
+    except (SignatureExpired, BadSignature, ValueError) as e:
+        print(f"Token Error: {e}")
+        flash('The password reset link is invalid or has expired.', 'error')
         return redirect(url_for('reset_password'))
-    
+
+    # POST request to handle the password reset
     if request.method == 'POST':
         new_password = request.form.get('new_password')
         confirm_password = request.form.get('confirm_password')
 
-        if new_password != confirm_password:
-            flash('Passwords do not match', 'error')
+        # Check if passwords match and are not empty
+        if not new_password or new_password != confirm_password:
+            flash('Passwords do not match or are empty.', 'error')
             return redirect(url_for('reset_with_token', token=token))
 
         # Hash the new password
         hashed_password = generate_password_hash(new_password)
 
         try:
+            # Update password in the database
             connection = create_db_connection()
-            if not connection:
-                flash("Database connection error", 'error')
-                return redirect(url_for('reset_with_token', token=token))
-
             cursor = connection.cursor()
-            query = "UPDATE users SET password = %s WHERE email = %s"
-            cursor.execute(query, (hashed_password, email))
+            cursor.execute("UPDATE users SET password = %s WHERE email = %s", (hashed_password, email))
             connection.commit()
 
-            flash('Password reset successful', 'success')
-            return redirect(url_for('tenant_login'))
-        except mysql.connector.Error as e:
+            flash('Password reset successful.', 'success')
+            return redirect(url_for('passwordresetsucessful'))
+
+        except Exception as e:
             flash(f"Error resetting password: {e}", 'error')
             return redirect(url_for('reset_with_token', token=token))
-        finally:
-            if 'cursor' in locals():
-                cursor.close()
-            if 'connection' in locals():
-                connection.close()
 
-    return render_template('reset_with_token.html')
+        finally:
+            if 'cursor' in locals(): cursor.close()
+            if 'connection' in locals(): connection.close()
+
+    return render_template('reset_with_token.html', token=token)
+
+@app.route('/password-reset-sucessful')
+def passwordresetsucessful():
+    return render_template('passwordresetsucessful.html')
 
 # Admin Resetting passwords for any user
 @app.route('/settings', methods=['GET', 'POST'])
@@ -984,7 +1153,7 @@ def settings():
 @app.route('/logout')
 def logout():
     logout_user()
-    session.pop('user_id', None)
+    session.pop('email', None)
     flash('You have been logged out', 'success')
     
     # Redirect based on user role
@@ -1000,4 +1169,4 @@ def logout():
 
 
 if __name__ == '__main__':
-    app.run()
+    app.run(debug = True)
